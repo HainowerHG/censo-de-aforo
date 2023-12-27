@@ -12,6 +12,7 @@
 #include "i2c_config.h"
 #include "esp_event_base.h"
 #include "freertos/queue.h"
+#include "vl53l5cx_plugin_motion_indicator.h"
 
 
 static const char *TAG = "main";
@@ -23,6 +24,23 @@ int numPersonas = 0;
 
 QueueHandle_t Event_Queue;
 esp_err_t status;
+
+
+esp_err_t i2c_master_init(void)
+{
+    int i2c_port = 0;
+    i2c_config_t i2c_config = {
+            .mode = I2C_MODE_MASTER,
+            .sda_io_num = 21,
+            .sda_pullup_en = GPIO_PULLUP_ENABLE,
+            .scl_io_num = 22,
+            .scl_pullup_en = GPIO_PULLUP_ENABLE,
+            .master.clk_speed = VL53L5CX_MAX_CLK_SPEED,
+    };
+    i2c_param_config(i2c_port, &i2c_config);
+    return i2c_driver_install(i2c_port, i2c_config.mode, 0, 0, 0);
+
+}
 
 
 void person_Enter(void){
@@ -202,36 +220,75 @@ void app_main(void)
 	
 
 	ESP_ERROR_CHECK(i2c_master_init());
+
+	uint8_t 				status, loop, isAlive, isReady, i;
+    	VL53L5CX_Configuration 	Dev;			/* Sensor configuration */
+    	VL53L5CX_Motion_Configuration 	motion_config;	/* Motion configuration*/
+    	VL53L5CX_ResultsData 	Results;		/* Results data from VL53L5CX */
 	config.platform.address = VL53L5CX_DEFAULT_I2C_ADDRESS;
 
-	// Verificar si el sensor está conectado
-	status = vl53l5cx_is_alive(&config, &isAlive);
-	if (!isAlive || status ) {
-		printf("El sensor no está conectado. Por favor, verifica la conexión.\n");
-		return;
-	}
-	// Inicializar el sensor con la configuración
-	status = vl53l5cx_init(&config);
-	if(status)
-	{
-		printf("Error al cargar el sensor VL53L5CX ULD\n");
-		return;
-	}
+	tatus = vl53l5cx_is_alive(&Dev, &isAlive);
+	    if(!isAlive || status)
+	    {
+	        printf("VL53L5CX not detected at requested address\n");
+	        return;
+	    }
+	
+	    /* (Mandatory) Init VL53L5CX sensor */
+	    status = vl53l5cx_init(&Dev);
+	    if(status)
+	    {
+	        printf("VL53L5CX ULD Loading failed\n");
+	        return;
+	    }
 
-	// Comenzar a tomar medidas
-	 vl53l5cx_start_ranging(&config);
+    		printf("VL53L5CX ULD ready ! (Version : %s)\n",
+		VL53L5CX_API_REVISION);
 
+	status = vl53l5cx_motion_indicator_init(&Dev, &motion_config, VL53L5CX_RESOLUTION_4X4);
+	    if(status)
+	    {
+	        printf("Motion indicator init failed with status : %u\n", status);
+	        return;
+	    }
+	status = vl53l5cx_motion_indicator_set_distance_motion(&Dev, &motion_config, 1000, 2000);
+	    if(status)
+	    {
+	        printf("Motion indicator set distance motion failed with status : %u\n", status);
+	        return;
+	    }
+
+	status = vl53l5cx_set_ranging_frequency_hz(&Dev, 2);
+	status = vl53l5cx_start_ranging(&Dev);
+	
 	uint8_t loop = 0;
 	while(loop < 10)
 	{
-		status = vl53l5cx_check_data_ready(&config, &isReady);
-		if(isReady)
-		{
-			vl53l5cx_get_ranging_data(&config, &results);
-			printf("Print data no : %3u\n", config.streamcount);
-		}
-		loop++;
-		WaitMs(&(config.platform), 5);
-	}
-	printf("End of ULD demo\n");
+		status = vl53l5cx_check_data_ready(&Dev, &isReady);
+
+        if(isReady)
+        {
+            vl53l5cx_get_ranging_data(&Dev, &Results);
+
+            /* As the sensor is set in 4x4 mode by default, we have a total
+             * of 16 zones to print. For this example, only the data of first zone are
+             * print */
+            printf("Print data no : %3u\n", Dev.streamcount);
+            for(i = 0; i < 16; i++)
+            {
+                printf("Zone : %3d, Motion power : %3lu\n",
+                       i,
+                       Results.motion_indicator.motion[motion_config.map_id[i]]);
+            }
+            printf("\n");
+            loop++;
+        }
+
+        /* Wait a few ms to avoid too high polling (function in platform
+         * file, not in API) */
+        WaitMs(&(Dev.platform), 5);
+    }
+
+    status = vl53l5cx_stop_ranging(&Dev);
+    printf("End of ULD demo\n");
 }
