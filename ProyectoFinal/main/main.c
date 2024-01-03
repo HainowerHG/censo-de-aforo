@@ -75,7 +75,11 @@
 #include "vl53l5cx_api.h"
 #include "esp_event_base.h"
 #include "freertos/queue.h"
-#include "vl53l5cx_plugin_motion_indicator.h"
+#include "vl53l5cx_plugin_motion_indicator.h"´
+#include "nvs_flash.h"
+#include "nvs.h"
+#include "esp_timer.h"
+
 
 
 #define DISTANCETHRESHOLD 500
@@ -89,42 +93,26 @@ static int enterList[5] = {0, 1, 3, 2, 0};
 static int exitList[5] = {0, 2, 3, 1, 0};
 
 static int listIndex = 1;
-static int numPeople = 0;
+static int timerCounter = 0;
+static int hourCounter = 1;
+static int32_t peopleCountSum = 0;
+static int32_t peopleCounter = 0;
+static char meanBuffer[20];
+static char hourMeanKeyBuffer[15];
+static char* nvs_read_data;
 
 
-void registerZone(int zone)
-{
-    if(zone != zoneList[listIndex - 1]){
-        zoneList[listIndex] = zone;
-        listIndex = (listIndex + 1) % 5;
-        if(zone == 0){
-            if(memcmp(zoneList, enterList, 5*sizeof(int)) == 0){
-                numPeople++;
-                ESP_LOGI(TAG, "Entrada. Numero de Personas: %d", numPeople);
-            }
-            else if(memcmp(zoneList, exitList, 5*sizeof(int)) == 0){
-                numPeople--;
-                ESP_LOGI(TAG, "Salida. Numero de Personas: %d", numPeople);
-            }
-
-            memcpy(zoneList, defaultList, 5*sizeof(int));
-            listIndex = 1;
-        }
-    printf("zoneList: %d, %d, %d, %d, %d\n", zoneList[0], zoneList[1], zoneList[2], zoneList[3], zoneList[4]);
-    }
-    
-}
 
 void person_Enter(void){
-	numPeople++;
+	peopleCounter++;
 	ESP_LOGI(TAG, "Una persona ha entrado");
-	ESP_LOGI(TAG, "Hay %d personas\n", numPeople);
+	ESP_LOGI(TAG, "Hay %" PRId32 " personas\n", peopleCounter);
 }
 
 void person_Exit(void){
-	numPeople--;
+	peopleCounter--;
 	ESP_LOGI(TAG, "Una persona ha salido");
-	ESP_LOGI(TAG, "Hay %d personas\n", numPeople);
+	ESP_LOGI(TAG, "Hay %" PRId32 " personas\n", peopleCounter);
 }
 
 void highSleep_Enter(void){
@@ -236,8 +224,167 @@ static void deepSleep_exit_handler(void* handler_args, esp_event_base_t base, in
 }
 
 
+void nvs_write_values_int32_t(char* key, int32_t value){
+    printf("\n");
+    printf("Opening Non-Volatile Storage (NVS) handle... ");
+
+    nvs_handle_t my_handle;
+    esp_err_t err = nvs_open("storage", NVS_READWRITE, &my_handle);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Error (%s) opening NVS handle", esp_err_to_name(err));
+    } else {
+        printf("Done\n");
+        
+        printf("Updating %s in NVS ...", key);
+        err = nvs_set_i32(my_handle, key, value);
+        printf((err != ESP_OK) ? "Failed!\n" : "Done\n");
+
+        // Commit written value.
+        // After setting any values, nvs_commit() must be called to ensure changes are written
+        // to flash storage. Implementations may write to storage at other times,
+        // but this is not guaranteed.
+        printf("Committing updates in NVS ... ");
+        err = nvs_commit(my_handle);
+        printf((err != ESP_OK) ? "Failed!\n" : "Done\n");
+
+        // Close
+        nvs_close(my_handle);
+    }
+
+    printf("\n");
+}
+
+
+
+void nvs_write_values_str(char* key, char* value){
+    printf("\n");
+    printf("Opening Non-Volatile Storage (NVS) handle... ");
+
+    nvs_handle_t my_handle;
+    esp_err_t err = nvs_open("storage", NVS_READWRITE, &my_handle);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Error (%s) opening NVS handle", esp_err_to_name(err));
+    } else {
+        printf("Done\n");
+        
+        printf("Updating %s in NVS ...", key);
+        err = nvs_set_str(my_handle, key, value);
+        printf((err != ESP_OK) ? "Failed!\n" : "Done\n");
+
+        // Commit written value.
+        // After setting any values, nvs_commit() must be called to ensure changes are written
+        // to flash storage. Implementations may write to storage at other times,
+        // but this is not guaranteed.
+        printf("Committing updates in NVS ... ");
+        err = nvs_commit(my_handle);
+        printf((err != ESP_OK) ? "Failed!\n" : "Done\n");
+
+        // Close
+        nvs_close(my_handle);
+    }
+
+    printf("\n");
+}
+
+
+void nvs_read_values(void){
+    printf("\n");
+    printf("Opening Non-Volatile Storage (NVS) handle... ");
+
+    nvs_handle_t my_handle;
+    esp_err_t err = nvs_open("storage", NVS_READWRITE, &my_handle);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Error (%s) opening NVS handle", esp_err_to_name(err));
+    } else {
+       printf("Done\n");
+
+        // Read
+        printf("Reading data from NVS ... \n");
+        err = nvs_get_i32(my_handle, "peopleCount", &peopleCounter);
+        switch (err) {
+            case ESP_OK:
+                printf("People counter = %" PRIu32 "\n", peopleCounter);
+                break;
+            case ESP_ERR_NVS_NOT_FOUND:
+                printf("People counter is not initialized yet!\n");
+                break;
+            default :
+                printf("Error (%s) reading!\n", esp_err_to_name(err));
+        }
+
+        for(int i = 1; i <= 24; i++){
+            char key[15];
+            snprintf(key, sizeof(key), "peopleMean%d", i);
+            size_t required_size;
+            nvs_get_str(my_handle, key, NULL, &required_size);
+            nvs_read_data = malloc(required_size);
+            err =  nvs_get_str(my_handle, key, nvs_read_data, &required_size);
+            switch (err) {
+                case ESP_OK:
+                    printf("%s = %s\n", key, nvs_read_data);
+                    break;
+                case ESP_ERR_NVS_NOT_FOUND:
+                    printf("%s is not initialized yet!\n", key);
+                    break;
+                default :
+                    printf("Error (%s) reading!\n", esp_err_to_name(err));
+            }
+        }
+
+        nvs_close(my_handle);
+    }
+
+    printf("\n");
+}
+
+
+void registerZone(int zone)
+{
+    if(zone != zoneList[listIndex - 1]){
+        zoneList[listIndex] = zone;
+        listIndex = (listIndex + 1) % 5;
+        if(zone == 0){
+            if(memcmp(zoneList, enterList, 5*sizeof(int)) == 0){
+                peopleCounter++;
+                ESP_LOGI(TAG, "Entrada. Numero de Personas: %" PRId32 "", peopleCounter);
+                nvs_write_values_int32_t("peopleCount", peopleCounter);
+            }
+            else if(memcmp(zoneList, exitList, 5*sizeof(int)) == 0){
+                peopleCounter--;
+                ESP_LOGI(TAG, "Salida. Numero de Personas: %" PRId32 "", peopleCounter);
+                nvs_write_values_int32_t("peopleCount", peopleCounter);
+            }
+
+            memcpy(zoneList, defaultList, 5*sizeof(int));
+            listIndex = 1;
+        }
+    printf("zoneList: %d, %d, %d, %d, %d\n", zoneList[0], zoneList[1], zoneList[2], zoneList[3], zoneList[4]);
+    }
+    
+}
+
+static void mean_periodic_timer_callback(void* arg)
+{
+    peopleCountSum += peopleCounter; 
+    if(timerCounter == 5){
+        timerCounter = 0;
+        snprintf(meanBuffer, sizeof(meanBuffer), "%.2f" , (float)peopleCountSum/6);
+        snprintf(hourMeanKeyBuffer, sizeof(hourMeanKeyBuffer), "peopleMean%d", hourCounter);
+        nvs_write_values_str(hourMeanKeyBuffer, meanBuffer);
+        ESP_LOGI(TAG, "Media de la hora %i: %s\n", hourCounter, meanBuffer);
+        peopleCountSum = 0;
+        hourCounter = (hourCounter % 24) + 1;
+    }
+    else
+        timerCounter++;
+
+}
+
+
+
 void app_main(void)
 {
+
 
     /*
 	//Descomentar cuando implementemos eventos
@@ -288,7 +435,19 @@ void app_main(void)
 	}		
 
 	*/
+    //ESP_ERROR_CHECK(nvs_flash_erase()); //Quitar comentario para borrar la memoria flash
+    esp_err_t err = nvs_flash_init();
+    if (err == ESP_ERR_NVS_NO_FREE_PAGES || err == ESP_ERR_NVS_NEW_VERSION_FOUND) {
+        // NVS partition was truncated and needs to be erased
+        // Retry nvs_flash_init
+        ESP_ERROR_CHECK(nvs_flash_erase());
+        err = nvs_flash_init();
+    }
+    ESP_ERROR_CHECK(err);
 
+    peopleCounter = 0;
+    //Cargamos el valor de NVS en peopleCounter
+    nvs_read_values();
 
 
     //Define the i2c bus configuration
@@ -366,12 +525,15 @@ void app_main(void)
 	/* Set resolution in 8x8. WARNING : As others settings depend to this
 	 * one, it must be the first to use.
 	 */
-	status = vl53l5cx_set_resolution(&Dev, VL53L5CX_RESOLUTION_8X8);
+	
+    /*
+    status = vl53l5cx_set_resolution(&Dev, VL53L5CX_RESOLUTION_8X8);
 	if(status)
 	{
 		printf("vl53l5cx_set_resolution failed, status %u\n", status);
 		return;
 	}
+    */
 
 	/* Set ranging frequency to 10Hz.
 	 * Using 4x4, min frequency is 1Hz and max is 60Hz
@@ -404,6 +566,15 @@ void app_main(void)
 	status = vl53l5cx_set_integration_time_ms(&Dev, 20);
 
 
+    const esp_timer_create_args_t mean_periodic_timer_args = {
+            .callback = &mean_periodic_timer_callback,
+            /* name is optional, but may help identify the timer when debugging */
+            .name = "mean_periodic_timer"
+    };
+
+    esp_timer_handle_t mean_periodic_timer;
+    ESP_ERROR_CHECK(esp_timer_create(&mean_periodic_timer_args, &mean_periodic_timer));
+    ESP_ERROR_CHECK(esp_timer_start_periodic(mean_periodic_timer, 2000000)); //2s
 
     /*********************************/
     /*         Ranging loop          */
