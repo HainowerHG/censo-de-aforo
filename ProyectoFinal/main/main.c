@@ -79,7 +79,14 @@
 #include "nvs_flash.h"
 #include "nvs.h"
 #include "esp_timer.h"
+#include "lcd_1602a.h"
 
+int RS_PIN = 5;
+int EN_PIN = 18;
+int D4_PIN = 4;
+int D5_PIN = 19;
+int D6_PIN = 17;
+int D7_PIN = 16;
 
 
 #define DISTANCETHRESHOLD 500
@@ -107,6 +114,7 @@ void person_Enter(void){
 	peopleCounter++;
 	ESP_LOGI(TAG, "Una persona ha entrado");
 	ESP_LOGI(TAG, "Hay %" PRId32 " personas\n", peopleCounter);
+	
 }
 
 void person_Exit(void){
@@ -347,6 +355,10 @@ void registerZone(int zone)
             if(memcmp(zoneList, enterList, 5*sizeof(int)) == 0){
                 peopleCounter++;
                 ESP_LOGI(TAG, "Entrada. Numero de Personas: %" PRId32 "", peopleCounter);
+		char cadena[50];  
+                sprintf(cadena, "NUM PERSONAS: %d", peopleCounter);
+
+                printToLcd(cadena);
                 nvs_write_values_int32_t("peopleCount", peopleCounter);
             }
             else if(memcmp(zoneList, exitList, 5*sizeof(int)) == 0){
@@ -384,7 +396,13 @@ static void mean_periodic_timer_callback(void* arg)
 
 void app_main(void)
 {
+init_lcd(RS_PIN, EN_PIN, D4_PIN, D5_PIN, D6_PIN, D7_PIN);
 
+    // Set RS high for write mode
+    // This is kept here in case more configs
+    //    need to be sent to lcd before print
+    gpio_set_level(RS_PIN, 1);
+    vTaskDelay(100 / portTICK_PERIOD_MS);
 
     /*
 	//Descomentar cuando implementemos eventos
