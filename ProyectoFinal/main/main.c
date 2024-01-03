@@ -60,24 +60,11 @@
 *
 *******************************************************************************/
 
-/***********************************/
-/*   VL53L5CX ULD basic example    */
-/***********************************/
-/*
-* This example is the most basic. It initializes the VL53L5CX ULD, and starts
-* a ranging to capture 10 frames.
-*
-* By default, ULD is configured to have the following settings :
-* - Resolution 4x4
-* - Ranging period 1Hz
-*
-* In this example, we also suppose that the number of target per zone is
-* set to 1 , and all output are enabled (see file platform.h).
-*/
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <inttypes.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "driver/gpio.h"
@@ -323,6 +310,7 @@ void app_main(void)
     /*********************************/
 
     uint8_t 				status, loop, isAlive, isReady, i;
+    uint32_t 				integration_time_ms;
     VL53L5CX_Configuration 	Dev;			/* Sensor configuration */
     VL53L5CX_ResultsData 	Results;		/* Results data from VL53L5CX */
 
@@ -371,8 +359,50 @@ void app_main(void)
 
 
 
-    //Activamos el modo 8x8
-    //status = vl53l5cx_set_resolution(&Dev, VL53L5CX_RESOLUTION_8X8);
+   	 /*********************************/
+	/*        Set some params        */
+	/*********************************/
+
+	/* Set resolution in 8x8. WARNING : As others settings depend to this
+	 * one, it must be the first to use.
+	 */
+	status = vl53l5cx_set_resolution(&Dev, VL53L5CX_RESOLUTION_8X8);
+	if(status)
+	{
+		printf("vl53l5cx_set_resolution failed, status %u\n", status);
+		return;
+	}
+
+	/* Set ranging frequency to 10Hz.
+	 * Using 4x4, min frequency is 1Hz and max is 60Hz
+	 * Using 8x8, min frequency is 1Hz and max is 15Hz
+	 */
+	status = vl53l5cx_set_ranging_frequency_hz(&Dev, 10);
+	if(status)
+	{
+		printf("vl53l5cx_set_ranging_frequency_hz failed, status %u\n", status);
+		return ;
+	}
+
+	/* Set target order to closest */
+	status = vl53l5cx_set_target_order(&Dev, VL53L5CX_TARGET_ORDER_CLOSEST);
+	if(status)
+	{
+		printf("vl53l5cx_set_target_order failed, status %u\n", status);
+		return ;
+	}
+
+	status = vl53l5cx_set_ranging_mode(&Dev, VL53L5CX_RANGING_MODE_AUTONOMOUS);
+	if(status)
+	{
+		printf("vl53l5cx_set_ranging_mode failed, status %u\n", status);
+		return;
+	}
+
+	/* Using autonomous mode, the integration time can be updated (not possible
+	 * using continuous) */
+	status = vl53l5cx_set_integration_time_ms(&Dev, 20);
+
 
 
     /*********************************/
