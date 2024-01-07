@@ -75,11 +75,13 @@
 #include "vl53l5cx_api.h"
 #include "esp_event_base.h"
 #include "freertos/queue.h"
-#include "vl53l5cx_plugin_motion_indicator.h"´
+#include "vl53l5cx_plugin_motion_indicator.h"
 #include "nvs_flash.h"
 #include "nvs.h"
 #include "esp_timer.h"
 #include "lcd_1602a.h"
+#include "esp_vfs.h"
+#include "esp_vfs_fat.h"
 
 int RS_PIN = 5;
 int EN_PIN = 18;
@@ -93,6 +95,13 @@ int D7_PIN = 16;
 
 static const char *TAG = "main";
 QueueHandle_t Event_Queue;
+
+const char *base_path = "/spiflash";
+static wl_handle_t s_wl_handle = WL_INVALID_HANDLE;
+static const char *log_path = "/spiflash/log.txt";
+
+
+
 
 static int zoneList[5] = {0, 0, 0, 0, 0};
 static int defaultList[5] = {0, 0, 0, 0, 0};
@@ -355,8 +364,8 @@ void registerZone(int zone)
             if(memcmp(zoneList, enterList, 5*sizeof(int)) == 0){
                 peopleCounter++;
                 ESP_LOGI(TAG, "Entrada. Numero de Personas: %" PRId32 "", peopleCounter);
-		char cadena[50];  
-                sprintf(cadena, "NUM PERSONAS: %d", peopleCounter);
+		        char cadena[50];  
+                sprintf(cadena, "NUM PERSONAS:  %" PRId32 "", peopleCounter);
 
                 printToLcd(cadena);
                 nvs_write_values_int32_t("peopleCount", peopleCounter);
@@ -393,16 +402,90 @@ static void mean_periodic_timer_callback(void* arg)
 }
 
 
+static void partition_write(void){
+    //ESP_LOGI(TAG, "Opening file");
+    printf("Opening file\n");
+    FILE *f = fopen("/spiflash/hello.txt", "wb");
+    if (f == NULL) {
+        //ESP_LOGE(TAG, "Failed to open file for writing");
+        printf("Failed to open file for writing\n");
+        return;
+    }
+    fprintf(f, "written using ESP-IDF %s\n", esp_get_idf_version());
+    fprintf(f, "Hola esto es un mensaje de prueba");
+    fclose(f);
+    ESP_LOGI(TAG, "File written");
+}
+
+static void partition_read(void){
+    printf("Reading File\n");
+    FILE *f = fopen("/spiflash/log.txt", "rb");
+    if (f == NULL) {
+       printf("Failed to open file for reading");
+        return;
+    }
+    char line[128];
+    /*fgets(line, sizeof(line), f);
+    fclose(f);
+    // strip newline
+    char *pos = strchr(line, '\n');
+    if (pos) {
+        *pos = '\0';
+    }
+    ESP_LOGI(TAG, "Read from file: '%s'", line);*/
+
+    while (fgets(line, sizeof(line), f) != NULL) {
+        // strip newline
+        char *pos = strchr(line, '\n');
+        if (pos) {
+            *pos = '\0';
+        }
+        //ESP_LOGI(TAG, "Read from file: '%s'", line);
+        printf("Read from file: '%s'\n", line);
+    }
+    fclose(f);
+}
+
+
+static int log_print_manager(const char *fmt, va_list args){
+
+    char log_level = fmt[7];
+
+    if(log_level == 'E' || log_level == 'W'){
+        FILE *log_file;
+
+        //printf("Se escribe en el archivo %s\n", log_path);
+
+        if (access(log_path, F_OK) == -1) {
+            // El archivo no existe, crearlo
+            log_file = fopen(log_path, "wb");
+            if (log_file == NULL) {
+                printf("Error al crear el archivo\n");
+                return -1;
+            }
+            printf("Se creó el archivo %s\n", log_path);
+        } else {
+        
+            log_file = fopen(log_path, "a");
+            if (log_file == NULL) {
+                printf("Error al abrir el archivo %s\n", log_path);
+                return -1;
+            }
+        }
+        int ret = vfprintf(log_file, fmt, args);
+        fclose(log_file);
+        //printf("Se ha escrito en el archivo%s\n", log_path);
+        return ret;
+    }
+    else{
+        return vprintf(fmt, args);
+    }
+}
+
 
 void app_main(void)
 {
-init_lcd(RS_PIN, EN_PIN, D4_PIN, D5_PIN, D6_PIN, D7_PIN);
-
-    // Set RS high for write mode
-    // This is kept here in case more configs
-    //    need to be sent to lcd before print
-    gpio_set_level(RS_PIN, 1);
-    vTaskDelay(100 / portTICK_PERIOD_MS);
+    
 
     /*
 	//Descomentar cuando implementemos eventos
@@ -452,9 +535,43 @@ init_lcd(RS_PIN, EN_PIN, D4_PIN, D5_PIN, D6_PIN, D7_PIN);
 		}
 	}		
 
+    init_lcd(RS_PIN, EN_PIN, D4_PIN, D5_PIN, D6_PIN, D7_PIN);
+
+    // Set RS high for write mode
+    // This is kept here in case more configs
+    //    need to be sent to lcd before print
+    gpio_set_level(RS_PIN, 1);
+    vTaskDelay(100 / portTICK_PERIOD_MS);
+
 	*/
+
+    const esp_vfs_fat_mount_config_t mount_config = {
+            .max_files = 4,
+            .format_if_mount_failed = true,
+            .allocation_unit_size = CONFIG_WL_SECTOR_SIZE
+    };
+    esp_err_t err = esp_vfs_fat_spiflash_mount("/spiflash", "storage", &mount_config, &s_wl_handle);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to mount FATFS (%s)", esp_err_to_name(err));
+        return;
+    }
+
+    esp_log_level_set("*", ESP_LOG_INFO);
+
+    esp_log_set_vprintf(&log_print_manager);
+
+    ESP_LOGE(TAG, "Log de Error");
+    ESP_LOGW(TAG, "Log de Warning");
+    ESP_LOGI(TAG, "Log de Informacion");
+    ESP_LOGD(TAG, "Log de Debug");
+    ESP_LOGV(TAG, "Log de Verbose");
+
+    partition_read();
+
+
     //ESP_ERROR_CHECK(nvs_flash_erase()); //Quitar comentario para borrar la memoria flash
-    esp_err_t err = nvs_flash_init();
+
+    err = nvs_flash_init();
     if (err == ESP_ERR_NVS_NO_FREE_PAGES || err == ESP_ERR_NVS_NEW_VERSION_FOUND) {
         // NVS partition was truncated and needs to be erased
         // Retry nvs_flash_init
@@ -466,6 +583,14 @@ init_lcd(RS_PIN, EN_PIN, D4_PIN, D5_PIN, D6_PIN, D7_PIN);
     peopleCounter = 0;
     //Cargamos el valor de NVS en peopleCounter
     nvs_read_values();
+
+
+    
+
+    //partition_write();
+    //partition_read();
+
+
 
 
     //Define the i2c bus configuration
@@ -637,4 +762,9 @@ init_lcd(RS_PIN, EN_PIN, D4_PIN, D5_PIN, D6_PIN, D7_PIN);
 
     status = vl53l5cx_stop_ranging(&Dev);
     printf("End of ULD demo\n");
+
+    ESP_LOGI(TAG, "Unmounting FAT filesystem");
+    ESP_ERROR_CHECK( esp_vfs_fat_spiflash_unmount(base_path, s_wl_handle));
+
+    ESP_LOGI(TAG, "Done");
 }
