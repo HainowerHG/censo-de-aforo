@@ -120,7 +120,7 @@ void printToLcd(char c[]) {
         for( int i = 7; i >= 0; i-- ) {
             // get pin value according to bit
             pinVal = (( x >> i ) & 1 ? 1 : 0 );
-            ESP_LOGI(TAGH, "setting pin %d to %d", pins[pin_counter], pinVal);
+            //ESP_LOGI(TAGH, "setting pin %d to %d", pins[pin_counter], pinVal);
             // set corresponding pin value to pin
             gpio_set_level(pins[pin_counter], pinVal);
             --pin_counter;
