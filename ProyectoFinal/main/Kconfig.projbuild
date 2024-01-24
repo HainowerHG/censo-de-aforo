@@ -1,0 +1,23 @@
+menu "Active SLEEP Configuration"
+
+    orsource "$IDF_PATH/examples/common_components/env_caps/$IDF_TARGET/Kconfig.env_caps"
+
+    config TIME_ACTIVE_MODE
+        int "TIME_ACTIVE_MODE_MIN"
+        default 2
+        help
+           Tiempo de funcionando desde el arranque.
+
+    config TIME_LIGHT_SLEEP
+        int "TIME_LIGHT_SLEEP_MIN"
+        default 1
+        help
+            Tiempo de espera sin actividad antes de entrar a sueño ligero.
+
+    config TIME_LIGHT_SLEEP
+        int "TIME_LIGHT_SLEEP_MIN"
+        default 1
+        help
+            Tiempo dentro del Deep Sleep.
+        
+endmenu
