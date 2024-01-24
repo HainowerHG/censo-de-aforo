@@ -76,7 +76,7 @@
 #include "freertos/queue.h"
 #include "nvs_flash.h"
 #include "nvs.h"
-#include "lcd_1602a.h"
+#include "LCD1602a.h"
 #include "esp_vfs.h"
 #include "esp_vfs_fat.h"
 #include "esp_timer.h"
