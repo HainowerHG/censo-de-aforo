@@ -541,8 +541,8 @@ void app_main(void)
 
     people_counter_init();
 
-    xTaskCreate(&people_counter_start, "people_counter_task", 4096, NULL, 5, &xHandle);
-
+    // xTaskCreate(&people_counter_start, "people_counter_task", 4096, NULL, 5, &xHandle); // este me genera errore por el bocle infinito y la perición del core hhg
+     xTaskCreatePinnedToCore(&people_counter_start, "people_counter_task", 4096, NULL, 5, &xHandle,1);
  	while(1){
         
         xQueueReceive(Event_Queue, &eNewEvent, portMAX_DELAY);
@@ -578,8 +578,6 @@ void app_main(void)
 				break;
 		}
 	}		
-
-    printf("End of ULD demo\n");
 
     ESP_LOGI(TAG, "Unmounting FAT filesystem");
     ESP_ERROR_CHECK( esp_vfs_fat_spiflash_unmount(base_path, s_wl_handle));
