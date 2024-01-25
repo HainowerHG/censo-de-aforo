@@ -4,12 +4,12 @@ dependencies:
     source:
       type: idf
     version: 5.1.1
-  rjrp44/vl53l5cx:
-    component_hash: 30ff636b21bf002c8bbcfc3d793e4296b07f83a64ab567dbd82e59148f24b4da
+  rjrp44__vl53l5cx:
+    component_hash: null
     source:
-      service_url: https://api.components.espressif.com/
-      type: service
+      path: C:\Users\Dani\Documents\Universidad\ANIOT\ProyectoFinal\ProyectoFinalv7\ProyectoFinal\components\rjrp44__vl53l5cx
+      type: local
     version: 2.0.3
-manifest_hash: 3df79e1fc4ba27ab3ee03951939732db2f1180a7390c61905a9f5477607102a0
+manifest_hash: 1800164a1446ec22b6208924c704cf878d4bf72f730cf57a17c5d434e510cb49
 target: esp32
 version: 1.0.0

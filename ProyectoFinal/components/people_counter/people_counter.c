@@ -6,18 +6,7 @@ ESP_EVENT_DEFINE_BASE(PEOPLE_COUNTER_EVENT);
 
 void people_counter_init(){
     //Define the i2c bus configuration
-    i2c_port_t i2c_port = I2C_NUM_1;
-    i2c_config_t i2c_config = {
-            .mode = I2C_MODE_MASTER,
-            .sda_io_num = 26,
-            .scl_io_num = 27,
-            .sda_pullup_en = GPIO_PULLUP_ENABLE,
-            .scl_pullup_en = GPIO_PULLUP_ENABLE,
-            .master.clk_speed = VL53L5CX_MAX_CLK_SPEED,
-    };
-
-    i2c_param_config(i2c_port, &i2c_config);
-    i2c_driver_install(i2c_port, i2c_config.mode, 0, 0, 0);
+    
 
     /*********************************/
     /*   VL53L5CX ranging variables  */
@@ -36,7 +25,7 @@ void people_counter_init(){
     * example, only the I2C address is used.
     */
     Dev.platform.address = VL53L5CX_DEFAULT_I2C_ADDRESS;
-    Dev.platform.port = i2c_port;
+    Dev.platform.port = I2C_NUM_1;
 
     /* (Optional) Reset sensor toggling PINs (see platform, not in API) */
     //Reset_Sensor(&(Dev.platform));
@@ -143,7 +132,7 @@ void registerZone(int zone)
         }
     printf("zoneList: %d, %d, %d, %d, %d\n", zoneList[0], zoneList[1], zoneList[2], zoneList[3], zoneList[4]);
     }
-    
+    esp_task_wdt_reset_user(registerZone_twdt_user_handle);
 }
 
 
@@ -155,6 +144,11 @@ void people_counter_start(void){
     /*********************************/
 
     uint8_t status, isReady, i;
+
+    ESP_ERROR_CHECK(esp_task_wdt_add(NULL));
+    ESP_ERROR_CHECK(esp_task_wdt_status(NULL));
+
+    ESP_ERROR_CHECK(esp_task_wdt_add_user("registerZone", &registerZone_twdt_user_handle));
 
 
     status = vl53l5cx_start_ranging(&Dev);
@@ -193,11 +187,14 @@ void people_counter_start(void){
 
         /* Wait a few ms to avoid too high polling (function in platform
          * file, not in API) */
+        esp_task_wdt_reset();
         WaitMs(&(Dev.platform), 5);
     }
 
     status = vl53l5cx_stop_ranging(&Dev);
-    
+    ESP_ERROR_CHECK(esp_task_wdt_delete_user(registerZone_twdt_user_handle));
+    ESP_ERROR_CHECK(esp_task_wdt_delete(NULL));
+    vTaskDelete(NULL);
 }
 
 

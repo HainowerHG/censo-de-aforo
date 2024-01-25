@@ -76,22 +76,21 @@
 #include "freertos/queue.h"
 #include "nvs_flash.h"
 #include "nvs.h"
-#include "LCD1602a.h"
 #include "esp_vfs.h"
 #include "esp_vfs_fat.h"
 #include "esp_timer.h"
 #include "people_counter.h"
+#include "esp_task_wdt.h"
+#include "ssd1306.h"
 
-int RS_PIN = 5;
-int EN_PIN = 18;
-int D4_PIN = 4;
-int D5_PIN = 19;
-int D6_PIN = 17;
-int D7_PIN = 16;
+#define TWDT_TIMEOUT_MS         3000
+#define TASK_RESET_PERIOD_MS    2000
+#define MAIN_DELAY_MS           10000
 
 
 static const char *TAG = "main";
 QueueHandle_t Event_Queue;
+SSD1306_t SSD1306_dev;
 
 const char *base_path = "/spiflash";
 static wl_handle_t s_wl_handle = WL_INVALID_HANDLE;
@@ -105,6 +104,7 @@ static int hourCounter = 1;
 
 static char meanBuffer[20];
 static char hourMeanKeyBuffer[15];
+static char oled_buffer[20];
 
 static char* nvs_read_data;
 
@@ -228,9 +228,10 @@ void person_Enter(void){
 	peopleCount++;
 	ESP_LOGI(TAG, "Una persona ha entrado");
 	ESP_LOGI(TAG, "Hay %" PRId32 " personas\n", peopleCount);
-    char cadena[50];  
-    printf(cadena, "NUM PERSONAS:  %" PRId32 "", peopleCount);
-    printToLcd(cadena);
+    ssd1306_clear_screen(&SSD1306_dev, false);
+	//ssd1306_contrast(&SSD1306_dev, 0xff);
+    snprintf(oled_buffer, sizeof(oled_buffer), "%" PRId32, peopleCount);
+	ssd1306_display_text_x3(&SSD1306_dev, 2, oled_buffer, 5, false);
     nvs_write_values_int32_t("peopleCount", peopleCount);
 	
 }
@@ -239,6 +240,10 @@ void person_Exit(void){
 	peopleCount--;
 	ESP_LOGI(TAG, "Una persona ha salido");
 	ESP_LOGI(TAG, "Hay %" PRId32 " personas\n", peopleCount);
+    ssd1306_clear_screen(&SSD1306_dev, false);
+	//ssd1306_contrast(&SSD1306_dev, 0xff);
+    snprintf(oled_buffer, sizeof(oled_buffer), "%" PRId32, peopleCount);
+	ssd1306_display_text_x3(&SSD1306_dev, 2, oled_buffer, 5, false);
     nvs_write_values_int32_t("peopleCount", peopleCount);
 }
 
@@ -473,14 +478,13 @@ void app_main(void)
 
     esp_log_set_vprintf(&log_print_manager);
 
-    /*
+    
     ESP_LOGE(TAG, "Log de Error");
     ESP_LOGW(TAG, "Log de Warning");
     ESP_LOGI(TAG, "Log de Informacion");
     ESP_LOGD(TAG, "Log de Debug");
     ESP_LOGV(TAG, "Log de Verbose");
 
-    */
 
     partition_read();
 
@@ -500,13 +504,43 @@ void app_main(void)
     //Cargamos el valor de NVS en peopleCounter
     nvs_read_values();
 
-    init_lcd(RS_PIN, EN_PIN, D4_PIN, D5_PIN, D6_PIN, D7_PIN);
 
-    // Set RS high for write mode
-    // This is kept here in case more configs
-    //    need to be sent to lcd before print
-    gpio_set_level(RS_PIN, 1);
-    vTaskDelay(100 / portTICK_PERIOD_MS);
+    i2c_port_t i2c_port = I2C_NUM_1;
+    i2c_config_t i2c_config = {
+            .mode = I2C_MODE_MASTER,
+            .sda_io_num = 26,
+            .scl_io_num = 27,
+            .sda_pullup_en = GPIO_PULLUP_ENABLE,
+            .scl_pullup_en = GPIO_PULLUP_ENABLE,
+            .master.clk_speed = VL53L5CX_MAX_CLK_SPEED,
+    };
+
+    i2c_param_config(i2c_port, &i2c_config);
+    i2c_driver_install(i2c_port, i2c_config.mode, 0, 0, 0);
+
+
+    
+
+    
+    i2c_master_init(&SSD1306_dev, 33, 32, 17);
+	ssd1306_init(&SSD1306_dev, 128, 64);
+    ssd1306_clear_screen(&SSD1306_dev, false);
+	ssd1306_contrast(&SSD1306_dev, 0xff);
+    snprintf(oled_buffer, sizeof(oled_buffer), "%" PRId32, peopleCount);
+	ssd1306_display_text_x3(&SSD1306_dev, 2, oled_buffer, 5, false);
+    
+
+    // Watchdog
+    #if !CONFIG_ESP_TASK_WDT_INIT
+    esp_task_wdt_config_t twdt_config = {
+        .timeout_ms = TWDT_TIMEOUT_MS,
+        .idle_core_mask = (1 << portNUM_PROCESSORS) - 1,    // Bitmask of all cores
+        .trigger_panic = false,
+    };
+    ESP_ERROR_CHECK(esp_task_wdt_init(&twdt_config));
+    #endif // CONFIG_ESP_TASK_WDT_INIT
+
+
 
 
     const esp_timer_create_args_t mean_periodic_timer_args = {
@@ -541,8 +575,8 @@ void app_main(void)
 
     people_counter_init();
 
-    // xTaskCreate(&people_counter_start, "people_counter_task", 4096, NULL, 5, &xHandle); // este me genera errore por el bocle infinito y la perición del core hhg
-     xTaskCreatePinnedToCore(&people_counter_start, "people_counter_task", 4096, NULL, 5, &xHandle,1);
+    xTaskCreate(&people_counter_start, "people_counter_task", 4096, NULL, 5, &xHandle);
+
  	while(1){
         
         xQueueReceive(Event_Queue, &eNewEvent, portMAX_DELAY);
@@ -578,6 +612,13 @@ void app_main(void)
 				break;
 		}
 	}		
+
+
+    #if !CONFIG_ESP_TASK_WDT_INIT
+    // If we manually initialized the TWDT, deintialize it now
+    ESP_ERROR_CHECK(esp_task_wdt_deinit());
+    printf("TWDT deinitialized\n");
+    #endif // CONFIG_ESP_TASK_WDT_INIT
 
     ESP_LOGI(TAG, "Unmounting FAT filesystem");
     ESP_ERROR_CHECK( esp_vfs_fat_spiflash_unmount(base_path, s_wl_handle));

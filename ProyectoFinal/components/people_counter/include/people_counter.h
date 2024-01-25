@@ -11,6 +11,7 @@
 #include "vl53l5cx_plugin_motion_indicator.h"
 #include <esp_log.h>
 #include "esp_event.h"
+#include "esp_task_wdt.h"
 
 #define DISTANCETHRESHOLD 500
 
@@ -34,6 +35,8 @@ static int listIndex = 1;
 
 static VL53L5CX_Configuration 	Dev;			/* Sensor configuration */
 static VL53L5CX_ResultsData 	Results;		/* Results data from VL53L5CX */
+
+static esp_task_wdt_user_handle_t registerZone_twdt_user_handle;
 
 
 void people_counter_init(void);        
