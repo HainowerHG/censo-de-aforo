@@ -71,7 +71,6 @@
 #include "esp_system.h"
 #include "sdkconfig.h"
 #include "esp_log.h"
-#include "esp_sleep.h"
 #include "esp_err.h"
 #include "esp_event_base.h"
 #include "freertos/queue.h"
@@ -83,10 +82,12 @@
 #include "people_counter.h"
 #include "esp_task_wdt.h"
 #include "ssd1306.h"
+#include "esp_sleep.h"
+#include "light_sleep_example.h"
 
-#define TIME_ACTIVE_MODE        CONFIG_TIME_ACTIVE_MODE_MIN *60 // TIEMPO que el sistema está activo antes de entrar a deepsleep 5 minutos
-#define TIME_DEEP_SLEEP         CONFIG_TIME_DEEP_SLEEP_MIN *60 // TIEMPO que el sistema está en deepsleep  y vuelve a despertar 2 minutos
-#define TIME_LIGHT_SLEEP        CONFIG_TIME_LIGHT_SLEEP_MIN *60 // TIEMPO que el sistema espera en detectar movimiento para entrar en  lightsleep 1 minuto
+#define TIME_ACTIVE_MODE        CONFIG_TIME_ACTIVE_MODE_MINUTES * 60 // TIEMPO que el sistema esta activo antes de entrar a deepsleep 5 minutos
+#define TIME_DEEP_SLEEP         CONFIG_TIME_DEEP_SLEEP_MINUTES * 60 // TIEMPO que el sistema está en deepsleep  y vuelve a despertar 2 minutos
+#define TIME_LIGHT_SLEEP_ENTER  CONFIG_TIME_LIGHT_SLEEP_ENTER_SECONDS // TIEMPO que el sistema espera en detectar movimiento para entrar en  lightsleep 1 minuto
 
 #define TWDT_TIMEOUT_MS         3000
 #define TASK_RESET_PERIOD_MS    2000
@@ -95,6 +96,7 @@
 
 static const char *TAG = "main";
 QueueHandle_t Event_Queue;
+esp_timer_handle_t enter_light_sleep_timer;
 SSD1306_t SSD1306_dev;
 
 const char *base_path = "/spiflash";
@@ -238,7 +240,8 @@ void person_Enter(void){
     snprintf(oled_buffer, sizeof(oled_buffer), "%" PRId32, peopleCount);
 	ssd1306_display_text_x3(&SSD1306_dev, 2, oled_buffer, 5, false);
     nvs_write_values_int32_t("peopleCount", peopleCount);
-	
+    ESP_ERROR_CHECK(esp_timer_stop(enter_light_sleep_timer));
+	ESP_ERROR_CHECK(esp_timer_start_once(enter_light_sleep_timer, TIME_LIGHT_SLEEP_ENTER * 1000000));
 }
 
 void person_Exit(void){
@@ -250,17 +253,10 @@ void person_Exit(void){
     snprintf(oled_buffer, sizeof(oled_buffer), "%" PRId32, peopleCount);
 	ssd1306_display_text_x3(&SSD1306_dev, 2, oled_buffer, 5, false);
     nvs_write_values_int32_t("peopleCount", peopleCount);
+    ESP_ERROR_CHECK(esp_timer_stop(enter_light_sleep_timer));
+	ESP_ERROR_CHECK(esp_timer_start_once(enter_light_sleep_timer, TIME_LIGHT_SLEEP_ENTER * 1000000));
 }
 
-
-void lightSleep_Enter(void){
-	ESP_LOGI(TAG, "Entra en lightSleep");
-    esp_light_sleep_start();
-}
-
-void lightSleep_Exit(void){
-	ESP_LOGI(TAG, "Sale de lightSleep");
-}
 
 void deepSleep_Enter(void){
 	ESP_LOGI(TAG, "Entra en DeepSleep");
@@ -269,25 +265,49 @@ void deepSleep_Enter(void){
 }
 
 void deepSleep_Exit(void){
-	ESP_LOGI(TAG, "Sale de DeepSleep");
+	ESP_LOGI(TAG, "Reboot por salida de DeepSleep");
 }
 
-//Estados
+void lightSleep_Enter(void){
+    ESP_LOGI(TAG, "Entra en lightSleep");
+    vTaskDelay(10 / portTICK_PERIOD_MS);
+    int64_t t_before_us = esp_timer_get_time();
+    esp_light_sleep_start();
+    int64_t t_after_us = esp_timer_get_time();
+
+    const char* wakeup_reason;
+    switch (esp_sleep_get_wakeup_cause()) {
+        case ESP_SLEEP_WAKEUP_TIMER:
+            wakeup_reason = "Timer";
+            break;
+        case ESP_SLEEP_WAKEUP_GPIO:
+            wakeup_reason = "GPIO";
+            break;
+        default:
+            wakeup_reason = "Other";
+            break;
+    }
+
+    ESP_LOGI(TAG, "Wakeup time: %lld us, reason: %s", t_after_us - t_before_us, wakeup_reason);
+
+    if (esp_sleep_get_wakeup_cause() == ESP_SLEEP_WAKEUP_GPIO) {
+            /* Waiting for the gpio inactive, or the chip will continously trigger wakeup*/
+            example_wait_gpio_inactive();
+    }
+    ESP_ERROR_CHECK(esp_timer_start_once(enter_light_sleep_timer, TIME_LIGHT_SLEEP_ENTER * 1000000));
+}
+
+
 typedef enum{
     Listening_State,
-	lightSleep_State,
-    DeepSleep_State
+	LightSleep_State
 } eSystemState;
 
-
-//Eventos
 typedef enum{
 	Person_Enter_Event,
     Person_Exit_Event,
-	lightSleep_Enter_Event,
-	lightSleep_Exit_Event,
-	DeepSleep_Enter_Event,
-	DeepSleep_Exit_Event
+	LightSleep_Enter_Event,
+	LightSleep_Exit_Event
 } eSystemEvent;
 
 
@@ -302,34 +322,22 @@ eSystemState Listening_State_Person_Exit_Event(void){
     return Listening_State;
 }
 
-eSystemState Listening_State_lightSleep_Enter_Event(void){
+eSystemState Listening_State_LightSleep_Enter_Event(void){
 	lightSleep_Enter();
-	return lightSleep_State;
+	return LightSleep_State;
 }
 
-eSystemState Listening_State_DeepSleep_Enter_Event(void){
-	deepSleep_Enter();
-	return DeepSleep_State;
-}
 
-//lightSleep_State
+//LightSleep_State
 
-eSystemState lightSleep_State_lightSleep_Exit_Event(void){
-	lightSleep_Exit();
+eSystemState LightSleep_State_LightSleep_Exit_Event(void){
+	//lightSleep_Exit();
 	return Listening_State;
 }
 
-eSystemState lightSleep_State_DeepSleep_Enter_Event(void){
-	deepSleep_Enter();
-	return DeepSleep_State;
-}
 
-//DeepSleep_State
 
-eSystemState DeepSleep_State_DeepSleep_Exit_Event(void){
-	deepSleep_Exit();
-	return Listening_State;
-}
+
 
 static void people_counter_enter_handler(void* handler_args, esp_event_base_t base, int32_t id, void* event_data)
 {
@@ -345,25 +353,13 @@ static void people_counter_exit_handler(void* handler_args, esp_event_base_t bas
 
 static void lightSleep_enter_handler(void* handler_args, esp_event_base_t base, int32_t id, void* event_data)
 {
-	eSystemEvent eNewEvent = lightSleep_Enter_Event;
+	eSystemEvent eNewEvent = LightSleep_Enter_Event;
 	xQueueSend(Event_Queue, &eNewEvent, portMAX_DELAY);
 }
 
 static void lightSleep_exit_handler(void* handler_args, esp_event_base_t base, int32_t id, void* event_data)
 {
-	eSystemEvent eNewEvent = lightSleep_Exit_Event;
-	xQueueSend(Event_Queue, &eNewEvent, portMAX_DELAY);
-}
-
-static void deepSleep_enter_handler(void* handler_args, esp_event_base_t base, int32_t id, void* event_data)
-{
-	eSystemEvent eNewEvent = DeepSleep_Enter_Event;
-	xQueueSend(Event_Queue, &eNewEvent, portMAX_DELAY);
-}
-
-static void deepSleep_exit_handler(void* handler_args, esp_event_base_t base, int32_t id, void* event_data)
-{
-	eSystemEvent eNewEvent = DeepSleep_Exit_Event;
+	eSystemEvent eNewEvent = LightSleep_Exit_Event;
 	xQueueSend(Event_Queue, &eNewEvent, portMAX_DELAY);
 }
 
@@ -386,6 +382,16 @@ static void mean_periodic_timer_callback(void* arg)
     else
         timerCounter++;
 
+}
+
+static void enter_deep_sleep_timer_callback(void* arg)
+{
+    deepSleep_Enter();
+}
+
+static void enter_light_sleep_timer_callback(void* arg)
+{
+    lightSleep_Enter();
 }
 
 
@@ -473,14 +479,13 @@ static int log_print_manager(const char *fmt, va_list args){
 void app_main(void)
 {
 
-    int tiempo_transcurrido = 0;
 
     esp_sleep_wakeup_cause_t wakeup_reason;
     wakeup_reason = esp_sleep_get_wakeup_cause();
     if(wakeup_reason == ESP_SLEEP_WAKEUP_TIMER) {
         deepSleep_Exit();
     }
-    
+
     const esp_vfs_fat_mount_config_t mount_config = {
             .max_files = 4,
             .format_if_mount_failed = true,
@@ -497,11 +502,11 @@ void app_main(void)
     esp_log_set_vprintf(&log_print_manager);
 
     
-    ESP_LOGE(TAG, "Log de Error");
-    ESP_LOGW(TAG, "Log de Warning");
-    ESP_LOGI(TAG, "Log de Informacion");
-    ESP_LOGD(TAG, "Log de Debug");
-    ESP_LOGV(TAG, "Log de Verbose");
+    //ESP_LOGE(TAG, "Log de Error");
+    //ESP_LOGW(TAG, "Log de Warning");
+    //ESP_LOGI(TAG, "Log de Informacion");
+    //ESP_LOGD(TAG, "Log de Debug");
+    //ESP_LOGV(TAG, "Log de Verbose");
 
 
     partition_read();
@@ -572,7 +577,33 @@ void app_main(void)
     ESP_ERROR_CHECK(esp_timer_create(&mean_periodic_timer_args, &mean_periodic_timer));
     ESP_ERROR_CHECK(esp_timer_start_periodic(mean_periodic_timer, 2000000)); //2s
 
+    const esp_timer_create_args_t enter_deep_sleep_timer_args = {
+            .callback = &enter_deep_sleep_timer_callback,
+            /* name is optional, but may help identify the timer when debugging */
+            .name = "enter_deep_sleep_timer"
+    };
+
+    esp_timer_handle_t enter_deep_sleep_timer;
+
+    ESP_ERROR_CHECK(esp_timer_create(&enter_deep_sleep_timer_args, &enter_deep_sleep_timer));
+    ESP_ERROR_CHECK(esp_timer_start_once(enter_deep_sleep_timer, TIME_ACTIVE_MODE * 1000000)); 
+
     
+
+    const esp_timer_create_args_t enter_light_sleep_timer_args = {
+            .callback = &enter_light_sleep_timer_callback,
+            /* name is optional, but may help identify the timer when debugging */
+            .name = "enter_light_sleep_timer"
+    };
+    
+
+    ESP_ERROR_CHECK(esp_timer_create(&enter_light_sleep_timer_args, &enter_light_sleep_timer));
+    ESP_ERROR_CHECK(esp_timer_start_once(enter_light_sleep_timer, TIME_LIGHT_SLEEP_ENTER * 1000000));
+
+    
+    //Light Sleep
+    example_register_gpio_wakeup();
+    example_register_timer_wakeup();
 
     //partition_write();
     //partition_read();
@@ -608,33 +639,16 @@ void app_main(void)
 				else if(eNewEvent == Person_Exit_Event){
 					eNextState = Listening_State_Person_Exit_Event();
 				}
-				else if(eNewEvent == lightSleep_Enter_Event){
-					eNextState = Listening_State_lightSleep_Enter_Event();
-				}
-				else if(eNewEvent == DeepSleep_Enter_Event){
-					eNextState = Listening_State_DeepSleep_Enter_Event();
+				else if(eNewEvent == LightSleep_Enter_Event){
+					eNextState = Listening_State_LightSleep_Enter_Event();
 				}
 				break;
-			case lightSleep_State:
-				if(eNewEvent == lightSleep_Exit_Event){
-					eNextState = lightSleep_State_lightSleep_Exit_Event();
-				}
-				else if(eNewEvent == DeepSleep_Enter_Event){
-					eNextState = lightSleep_State_DeepSleep_Enter_Event();
-				}
-				break;
-			case DeepSleep_State:
-				if(eNewEvent == DeepSleep_Exit_Event){
-					eNextState = DeepSleep_State_DeepSleep_Exit_Event();
+			case LightSleep_State:
+				if(eNewEvent == LightSleep_Exit_Event){
+					eNextState = LightSleep_State_LightSleep_Exit_Event();
 				}
 				break;
 		}
-        vTaskDelay(1000 / portTICK_PERIOD_MS); // Espera 1 segundo
-        tiempo_transcurrido++; // Incrementa el contador de tiempo
-        if (tiempo_transcurrido >= TIME_ACTIVE_MODE)
-        {
-           deepSleep_Enter();
-        }
 	}		
 
 

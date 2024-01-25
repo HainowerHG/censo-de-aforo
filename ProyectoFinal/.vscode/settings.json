@@ -6,6 +6,8 @@
   "files.associations": {
     "vl53l5cx_plugin_motion_indicator.h": "c",
     "complex": "c",
-    "ssd1306.h": "c"
+    "ssd1306.h": "c",
+    "esp_vfs_fat.h": "c",
+    "light_sleep_example.h": "c"
   }
 }

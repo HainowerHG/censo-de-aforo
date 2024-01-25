@@ -4395,6 +4395,94 @@
                 "children": [],
                 "depends_on": null,
                 "help": null,
+                "id": "ENV_GPIO_RANGE_MIN",
+                "name": "ENV_GPIO_RANGE_MIN",
+                "range": null,
+                "title": null,
+                "type": "int"
+            },
+            {
+                "children": [],
+                "depends_on": null,
+                "help": null,
+                "id": "ENV_GPIO_RANGE_MAX",
+                "name": "ENV_GPIO_RANGE_MAX",
+                "range": null,
+                "title": null,
+                "type": "int"
+            },
+            {
+                "children": [],
+                "depends_on": null,
+                "help": null,
+                "id": "ENV_GPIO_IN_RANGE_MAX",
+                "name": "ENV_GPIO_IN_RANGE_MAX",
+                "range": null,
+                "title": null,
+                "type": "int"
+            },
+            {
+                "children": [],
+                "depends_on": null,
+                "help": null,
+                "id": "ENV_GPIO_OUT_RANGE_MAX",
+                "name": "ENV_GPIO_OUT_RANGE_MAX",
+                "range": null,
+                "title": null,
+                "type": "int"
+            },
+            {
+                "children": [],
+                "depends_on": null,
+                "help": "Tiempo de funcionando desde el arranque.",
+                "id": "TIME_ACTIVE_MODE_MINUTES",
+                "name": "TIME_ACTIVE_MODE_MINUTES",
+                "range": null,
+                "title": "TIME_ACTIVE_MODE_MINUTES",
+                "type": "int"
+            },
+            {
+                "children": [],
+                "depends_on": null,
+                "help": "Tiempo en modo deepsleep.",
+                "id": "TIME_DEEP_SLEEP_MINUTES",
+                "name": "TIME_DEEP_SLEEP_MINUTES",
+                "range": null,
+                "title": "TIME_DEEP_SLEEP_MINUTES",
+                "type": "int"
+            },
+            {
+                "children": [],
+                "depends_on": null,
+                "help": "Tiempo de espera sin actividad antes de entrar a sue\u00f1o ligero.",
+                "id": "TIME_LIGHT_SLEEP_ENTER_SECONDS",
+                "name": "TIME_LIGHT_SLEEP_ENTER_SECONDS",
+                "range": null,
+                "title": "TIME_LIGHT_SLEEP_SECONDS",
+                "type": "int"
+            },
+            {
+                "children": [],
+                "depends_on": null,
+                "help": "Tiempo de espera sin actividad antes de entrar a sue\u00f1o ligero.",
+                "id": "TIME_LIGHT_SLEEP_EXIT_SECONDS",
+                "name": "TIME_LIGHT_SLEEP_EXIT_SECONDS",
+                "range": null,
+                "title": "TIME_LIGHT_SLEEP_SECONDS",
+                "type": "int"
+            }
+        ],
+        "depends_on": null,
+        "id": "active-sleep-configuration",
+        "title": "Active SLEEP Configuration",
+        "type": "menu"
+    },
+    {
+        "children": [
+            {
+                "children": [],
+                "depends_on": null,
+                "help": null,
                 "id": "GPIO_RANGE_MAX",
                 "name": "GPIO_RANGE_MAX",
                 "range": null,
